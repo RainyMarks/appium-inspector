@@ -1,8 +1,11 @@
 import {useEffect, useRef, useState} from 'react';
 
-import {COMMAND_EXECUTE_SCRIPT} from '../../../constants/commands.js';
-import {adjustParamValueType, transformCommandsMap, transformExecMethodsMap} from '../../../utils/commands-tab.js';
-import {isEmpty, isPlainObject} from '../../../utils/common.js';
+import {
+  prepareCommandForExecution,
+  transformCommandsMap,
+  transformExecMethodsMap,
+} from '../../../utils/commands-tab.js';
+import {isEmpty} from '../../../utils/common.js';
 import CommandParametersModal from './CommandParametersModal.jsx';
 import CommandResultModal from './CommandResult/CommandResultModal.jsx';
 import CommandsTabCard from './CommandsTabCard.jsx';
@@ -31,33 +34,8 @@ const Commands = ({applyClientMethod, getSupportedSessionMethods, getItemColspan
     }
   };
 
-  const prepareCommand = (cmdName, cmdParams, isExecute) => {
-    const adjustedCmdName = isExecute ? COMMAND_EXECUTE_SCRIPT : cmdName;
-    let adjustedCmdParams = curCommandParamValsRef.current.map(adjustParamValueType);
-
-    // If we are about to run an execute method,
-    // the parameters array needs to be turned into an object,
-    // and the command name added as a separate parameter.
-    if (isExecute) {
-      const mappedCmdParams = !isEmpty(cmdParams)
-        ? Object.fromEntries(cmdParams.map((p, i) => [p.name, adjustedCmdParams[i]]))
-        : {};
-      adjustedCmdParams = [cmdName, mappedCmdParams];
-    }
-
-    // The WebDriver spec for 'executeScript' requires 'args' to be an array
-    // (https://w3c.github.io/webdriver/#dfn-extract-the-script-arguments-from-a-request),
-    // but if the script doesn't use any arguments, we allow the user to omit it.
-    // So we can have 5 cases for 'args': undefined, {}, [], {...}, [{...}]
-    if (adjustedCmdName === COMMAND_EXECUTE_SCRIPT) {
-      if (isEmpty(adjustedCmdParams[1])) {
-        adjustedCmdParams[1] = [];
-      } else if (isPlainObject(adjustedCmdParams[1])) {
-        adjustedCmdParams[1] = [adjustedCmdParams[1]];
-      }
-    }
-    return [adjustedCmdName, adjustedCmdParams];
-  };
+  const prepareCommand = (cmdName, cmdParams, isExecute) =>
+    prepareCommandForExecution(cmdName, cmdParams, curCommandParamValsRef.current, isExecute);
 
   const runCommand = async (methodName, args, skipRefresh) => {
     const res = await applyClientMethod({

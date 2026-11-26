@@ -1,5 +1,89 @@
-import {APPIUM_TO_WD_COMMANDS, COMMANDS_WITH_MISMATCHED_PARAMS} from '../constants/commands.js';
+import {
+  APPIUM_TO_WD_COMMANDS,
+  COMMAND_DEFINITIONS,
+  COMMAND_EXECUTE_SCRIPT,
+  COMMANDS_WITH_MISMATCHED_PARAMS,
+  TOP_LEVEL_COMMANDS,
+} from '../constants/commands.js';
 import {isEmpty, isPlainObject} from './common.js';
+
+/**
+ * Prepare a command or execute method invocation into the WebdriverIO method name and argument array.
+ *
+ * @param {string} cmdName Command name or execute method name (e.g. 'mobile: terminateApp')
+ * @param {Array<{name: string, required?: boolean}>} [cmdParams] Parameter definitions
+ * @param {Array<*>} [rawParamVals] Raw parameter values matching cmdParams order
+ * @param {boolean} [isExecute=false] Whether cmdName is an execute method
+ * @param {{omitEmptyOptional?: boolean}} [options] Formatting options
+ * @returns {[string, Array<*>]} Tuple of [methodName, args]
+ */
+export function prepareCommandForExecution(
+  cmdName,
+  cmdParams = [],
+  rawParamVals = [],
+  isExecute = false,
+  {omitEmptyOptional = false} = {},
+) {
+  const adjustedCmdName = isExecute ? COMMAND_EXECUTE_SCRIPT : cmdName;
+  const convertRawValue = (val) => (typeof val === 'string' ? adjustParamValueType(val) : val);
+  let adjustedCmdParams = rawParamVals.map(convertRawValue);
+
+  // If we are about to run an execute method,
+  // the parameters array needs to be turned into an object,
+  // and the command name added as a separate parameter.
+  if (isExecute) {
+    const entries = [];
+    if (!isEmpty(cmdParams)) {
+      for (let i = 0; i < cmdParams.length; i++) {
+        const param = cmdParams[i];
+        const rawVal = rawParamVals[i];
+        if (omitEmptyOptional && !param.required && (rawVal === undefined || rawVal === '')) {
+          continue;
+        }
+        entries.push([param.name, adjustedCmdParams[i]]);
+      }
+    }
+    const mappedCmdParams = Object.fromEntries(entries);
+    adjustedCmdParams = [cmdName, mappedCmdParams];
+  } else if (omitEmptyOptional && !isEmpty(cmdParams)) {
+    let lastIncludedIndex = -1;
+    for (let i = 0; i < cmdParams.length; i++) {
+      const param = cmdParams[i];
+      const rawVal = rawParamVals[i];
+      if (param.required || (rawVal !== undefined && rawVal !== '')) {
+        lastIncludedIndex = i;
+      }
+    }
+    adjustedCmdParams = lastIncludedIndex >= 0 ? adjustedCmdParams.slice(0, lastIncludedIndex + 1) : [];
+  }
+
+  // The WebDriver spec for 'executeScript' requires 'args' to be an array
+  // (https://w3c.github.io/webdriver/#dfn-extract-the-script-arguments-from-a-request),
+  // but if the script doesn't use any arguments, we allow the user to omit it.
+  // So we can have 5 cases for 'args': undefined, {}, [], {...}, [{...}]
+  if (adjustedCmdName === COMMAND_EXECUTE_SCRIPT) {
+    if (isEmpty(adjustedCmdParams[1])) {
+      adjustedCmdParams[1] = [];
+    } else if (isPlainObject(adjustedCmdParams[1])) {
+      adjustedCmdParams[1] = [adjustedCmdParams[1]];
+    }
+  }
+  return [adjustedCmdName, adjustedCmdParams];
+}
+
+/**
+ * Return the flat list of static command definitions as [commandName, commandDetails] pairs.
+ * Used as a fallback when a driver does not expose dynamic method maps.
+ *
+ * @returns {[string, Object][]}
+ */
+export function getStaticCommandsList() {
+  const commands = {...TOP_LEVEL_COMMANDS};
+  for (const groupCommands of Object.values(COMMAND_DEFINITIONS)) {
+    Object.assign(commands, groupCommands);
+  }
+  return Object.entries(commands);
+}
 
 /**
  * Try to detect if the input value should be a boolean/number/array/object,

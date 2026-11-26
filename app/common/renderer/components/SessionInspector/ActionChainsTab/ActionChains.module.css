@@ -1,0 +1,66 @@
+.savedActionChainsTable :global(.ant-table) {
+  height: 100%;
+}
+
+.actionChainHeaderTitle {
+  font-size: 18px;
+  font-weight: 500;
+  box-shadow: none !important;
+  border-width: 0px !important;
+}
+
+.actionChainHeaderDescriptionInput {
+  font-size: 15px;
+  font-weight: 400;
+  color: #636363;
+  box-shadow: none !important;
+  border-width: 0px !important;
+}
+
+.actionChainEditorDivider {
+  margin: 10px 0;
+}
+
+.actionChainStepsScroll {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.stepCardDropTarget {
+  outline: 2px solid var(--ant-color-primary);
+}
+
+.stepDragHandle {
+  cursor: grab;
+  touch-action: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.stepIndexBadge {
+  font-weight: 600;
+  min-width: 24px;
+}
+
+.paramRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.emptyStepsHint {
+  text-align: center;
+  padding: 24px 12px;
+  color: #8c8c8c;
+}
+
+.resultStepDetails {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 12px;
+}

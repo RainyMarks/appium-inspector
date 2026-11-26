@@ -1,11 +1,16 @@
 import {
+  ACTION_CHAIN_UPLOAD_DONE,
+  ACTION_CHAIN_UPLOAD_REQUESTED,
   ADD_ASSIGNED_VAR_CACHE,
+  CLEAR_ACTION_CHAIN_RUN_RESULT,
   CLEAR_ASSIGNED_VAR_CACHE,
   CLEAR_COORD_ACTION,
   CLEAR_RECORDING,
   CLEAR_SEARCH_RESULTS,
   CLEAR_SEARCHED_FOR_ELEMENT_BOUNDS,
   CLEAR_TAP_COORDINATES,
+  DELETE_SAVED_ACTION_CHAINS_DONE,
+  DELETE_SAVED_ACTION_CHAINS_REQUESTED,
   DELETE_SAVED_GESTURES_DONE,
   DELETE_SAVED_GESTURES_REQUESTED,
   FINDING_ELEMENT_IN_SOURCE,
@@ -14,8 +19,11 @@ import {
   GESTURE_UPLOAD_REQUESTED,
   GET_FIND_ELEMENTS_TIMES,
   GET_FIND_ELEMENTS_TIMES_COMPLETED,
+  GET_SAVED_ACTION_CHAINS_DONE,
+  GET_SAVED_ACTION_CHAINS_REQUESTED,
   GET_SAVED_GESTURES_DONE,
   GET_SAVED_GESTURES_REQUESTED,
+  HIDE_ACTION_CHAIN_EDITOR,
   HIDE_GESTURE_ACTION,
   HIDE_GESTURE_EDITOR,
   HIDE_LOCATOR_SEARCH_MODAL,
@@ -27,7 +35,11 @@ import {
   QUIT_SESSION_DONE,
   QUIT_SESSION_REQUESTED,
   RECORD_ACTION,
+  REMOVE_LOADED_ACTION_CHAIN,
   REMOVE_LOADED_GESTURE,
+  RUN_ACTION_CHAIN_DONE,
+  RUN_ACTION_CHAIN_STARTED,
+  RUN_ACTION_CHAIN_STEP_UPDATED,
   SEARCHING_FOR_ELEMENTS,
   SEARCHING_FOR_ELEMENTS_COMPLETED,
   SELECT_CENTROID,
@@ -50,6 +62,7 @@ import {
   SET_INTERACTIONS_NOT_AVAILABLE,
   SET_KEEP_ALIVE_INTERVAL,
   SET_LAST_ACTIVE_MOMENT,
+  SET_LOADED_ACTION_CHAIN,
   SET_LOADED_GESTURE,
   SET_LOCATOR_SEARCH_STRATEGY,
   SET_LOCATOR_SEARCH_VALUE,
@@ -66,6 +79,7 @@ import {
   SET_SHOW_CENTROIDS,
   SET_SOURCE_AND_SCREENSHOT,
   SET_USER_WAIT_TIMEOUT,
+  SHOW_ACTION_CHAIN_EDITOR,
   SHOW_GESTURE_ACTION,
   SHOW_GESTURE_EDITOR,
   SHOW_LOCATOR_SEARCH_MODAL,
@@ -82,6 +96,7 @@ import {omit} from '../utils/common.js';
 
 const INITIAL_STATE = {
   savedGestures: [],
+  savedActionChains: [],
   driver: null,
   keepAliveInterval: null,
   showKeepAlivePrompt: false,
@@ -98,6 +113,7 @@ const INITIAL_STATE = {
   featureCaps: {},
   sessionSettings: {},
   isGestureEditorVisible: false,
+  isActionChainEditorVisible: false,
   isLocatorSearchModalVisible: false,
   showCentroids: false,
   locatorSearchStrategy: 'id',
@@ -114,6 +130,9 @@ const INITIAL_STATE = {
   isAwaitingMjpegStream: true,
   showSourceAttrs: false,
   isUploadingGestureFiles: false,
+  isUploadingActionChainFiles: false,
+  runningActionChain: null,
+  actionChainRunResult: null,
   autoSessionRestart: false,
 };
 
@@ -602,6 +621,103 @@ export default function inspector(state = INITIAL_STATE, action) {
       return {
         ...state,
         autoSessionRestart: action.autoSessionRestart,
+      };
+
+    case ACTION_CHAIN_UPLOAD_REQUESTED:
+      return {
+        ...state,
+        isUploadingActionChainFiles: true,
+      };
+
+    case ACTION_CHAIN_UPLOAD_DONE:
+      return {
+        ...state,
+        isUploadingActionChainFiles: false,
+      };
+
+    case SHOW_ACTION_CHAIN_EDITOR:
+      return {
+        ...state,
+        isActionChainEditorVisible: true,
+      };
+
+    case HIDE_ACTION_CHAIN_EDITOR:
+      return {
+        ...state,
+        isActionChainEditorVisible: false,
+      };
+
+    case GET_SAVED_ACTION_CHAINS_REQUESTED:
+      return {
+        ...state,
+        getSavedActionChainsRequested: true,
+      };
+
+    case GET_SAVED_ACTION_CHAINS_DONE:
+      nextState = {
+        ...state,
+        savedActionChains: action.savedActionChains || [],
+      };
+      return omit(nextState, 'getSavedActionChainsRequested');
+
+    case DELETE_SAVED_ACTION_CHAINS_REQUESTED:
+      return {
+        ...state,
+        deleteActionChain: action.deleteActionChain,
+      };
+
+    case DELETE_SAVED_ACTION_CHAINS_DONE:
+      return omit(state, 'deleteActionChain');
+
+    case SET_LOADED_ACTION_CHAIN:
+      return {
+        ...state,
+        loadedActionChain: action.loadedActionChain,
+      };
+
+    case REMOVE_LOADED_ACTION_CHAIN:
+      return omit(state, 'loadedActionChain');
+
+    case RUN_ACTION_CHAIN_STARTED:
+      return {
+        ...state,
+        runningActionChain: {
+          chainId: action.chainId,
+          chainName: action.chainName,
+          totalSteps: action.totalSteps,
+          currentStepIndex: 0,
+          stepResults: {},
+        },
+        actionChainRunResult: null,
+      };
+
+    case RUN_ACTION_CHAIN_STEP_UPDATED:
+      if (!state.runningActionChain) {
+        return state;
+      }
+      return {
+        ...state,
+        runningActionChain: {
+          ...state.runningActionChain,
+          currentStepIndex: action.stepIndex,
+          stepResults: {
+            ...state.runningActionChain.stepResults,
+            [action.stepResult.stepId]: action.stepResult,
+          },
+        },
+      };
+
+    case RUN_ACTION_CHAIN_DONE:
+      return {
+        ...state,
+        runningActionChain: null,
+        actionChainRunResult: action.runResult,
+      };
+
+    case CLEAR_ACTION_CHAIN_RUN_RESULT:
+      return {
+        ...state,
+        actionChainRunResult: null,
       };
 
     default:

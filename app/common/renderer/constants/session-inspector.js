@@ -68,6 +68,7 @@ export const NATIVE_DRIVER_LOCATOR_STRATEGY_MAP = {
 export const INSPECTOR_TABS = {
   SOURCE: 'source',
   COMMANDS: 'commands',
+  ACTION_CHAINS: 'actionChains',
   GESTURES: 'gestures',
   RECORDER: 'recorder',
   SESSION_INFO: 'sessionInfo',

@@ -4,6 +4,8 @@ import {useTranslation} from 'react-i18next';
 
 import {PLATFORMS_WITHOUT_W3C_ACTIONS} from '../../constants/common.js';
 import {INSPECTOR_TABS} from '../../constants/session-inspector.js';
+import ActionChainEditor from './ActionChainsTab/ActionChainEditor/ActionChainEditor.jsx';
+import SavedActionChains from './ActionChainsTab/SavedActionChains.jsx';
 import Commands from './CommandsTab/Commands.jsx';
 import GestureEditor from './GesturesTab/GestureEditor/GestureEditor.jsx';
 import SavedGestures from './GesturesTab/SavedGestures.jsx';
@@ -33,6 +35,7 @@ const SessionInspectorTabs = (props) => {
     selectedInspectorTab,
     selectInspectorTab,
     isGestureEditorVisible,
+    isActionChainEditorVisible,
     showScreenshot,
     applyClientMethod,
     getSupportedSessionMethods,
@@ -67,6 +70,12 @@ const SessionInspectorTabs = (props) => {
           getItemColspan={getItemColspan}
         />
       ),
+    },
+    {
+      label: t('Action Chains'),
+      key: INSPECTOR_TABS.ACTION_CHAINS,
+      disabled: !showScreenshot,
+      children: isActionChainEditorVisible ? <ActionChainEditor {...props} /> : <SavedActionChains {...props} />,
     },
     {
       label: areW3CActionsUnsupported ? (

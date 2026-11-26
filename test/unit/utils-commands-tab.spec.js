@@ -5,6 +5,8 @@ import {
   deepFilterEmpty,
   extractParamsFromCommandPath,
   filterMethodPairs,
+  getStaticCommandsList,
+  prepareCommandForExecution,
   transformCommandsMap,
   transformExecMethodsMap,
 } from '../../app/common/renderer/utils/commands-tab.js';
@@ -412,6 +414,69 @@ describe('utils/commands-tab.js', function () {
       expect(transformExecMethodsMap(getExecMethodsResponse)).toEqual([
         ['mobile: doThing', {command: 'doThing', info: 'from-plugin'}],
       ]);
+    });
+  });
+
+  describe('#prepareCommandForExecution', function () {
+    it('should prepare standard command positional arguments with type coercion', function () {
+      const [methodName, args] = prepareCommandForExecution(
+        'setTimeouts',
+        [
+          {name: 'implicit', required: false},
+          {name: 'pageLoad', required: false},
+        ],
+        ['5000', '10000'],
+        false,
+      );
+      expect(methodName).toBe('setTimeouts');
+      expect(args).toEqual([5000, 10000]);
+    });
+
+    it('should wrap execute methods in executeScript with an object argument array', function () {
+      const [methodName, args] = prepareCommandForExecution(
+        'mobile: terminateApp',
+        [
+          {name: 'bundleId', required: true},
+          {name: 'timeout', required: false},
+        ],
+        ['com.example.app', ''],
+        true,
+        {omitEmptyOptional: true},
+      );
+      expect(methodName).toBe('executeScript');
+      expect(args).toEqual(['mobile: terminateApp', [{bundleId: 'com.example.app'}]]);
+    });
+
+    it('should pass an empty args array for execute methods without parameters', function () {
+      const [methodName, args] = prepareCommandForExecution('mobile: deviceInfo', [], [], true);
+      expect(methodName).toBe('executeScript');
+      expect(args).toEqual(['mobile: deviceInfo', []]);
+    });
+
+    it('should omit trailing empty optional positional arguments when omitEmptyOptional is enabled', function () {
+      const [methodName, args] = prepareCommandForExecution(
+        'setTimeouts',
+        [
+          {name: 'implicit', required: false},
+          {name: 'pageLoad', required: false},
+        ],
+        ['3000', ''],
+        false,
+        {omitEmptyOptional: true},
+      );
+      expect(methodName).toBe('setTimeouts');
+      expect(args).toEqual([3000]);
+    });
+  });
+
+  describe('#getStaticCommandsList', function () {
+    it('should flatten top-level and grouped static command definitions', function () {
+      const staticCommands = getStaticCommandsList();
+      const commandNames = staticCommands.map(([name]) => name);
+      expect(commandNames).toContain('executeScript');
+      expect(commandNames).toContain('updateSettings');
+      expect(commandNames).toContain('terminateApp');
+      expect(commandNames).toContain('activateApp');
     });
   });
 });

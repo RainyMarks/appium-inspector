@@ -1,6 +1,12 @@
 import sanitize from 'sanitize-filename';
 
-import {PREFER_SOURCE_FIRST, SAVED_CLIENT_FRAMEWORK, SET_SAVED_GESTURES} from '../../shared/setting-defs.js';
+import {
+  PREFER_SOURCE_FIRST,
+  SAVED_ACTION_CHAINS,
+  SAVED_CLIENT_FRAMEWORK,
+  SET_SAVED_GESTURES,
+} from '../../shared/setting-defs.js';
+import {ACTION_CHAIN_RUN_STATUS} from '../constants/action-chains.js';
 import {COMMAND_EXECUTE_SCRIPT, COMMAND_UPDATE_SETTINGS} from '../constants/commands.js';
 import {DRIVERS} from '../constants/common.js';
 import {APP_MODE, NATIVE_APP, UNKNOWN_ERROR} from '../constants/session-inspector.js';
@@ -8,6 +14,12 @@ import i18n from '../i18next.js';
 import InspectorDriver from '../lib/appium/inspector-driver.js';
 import {CLIENT_FRAMEWORK_MAP} from '../lib/client-frameworks/map.js';
 import {getSetting, setSetting} from '../polyfills.js';
+import {
+  normalizeActionChain,
+  parseActionChainFileContents,
+  prepareActionChainForExport,
+} from '../utils/action-chain-file-parsing.js';
+import {executeActionChain} from '../utils/action-chain-runner.js';
 import {debounce, isEmpty, omit} from '../utils/common.js';
 import {downloadFile, readTextFromUploadedFiles} from '../utils/file-handling.js';
 import {parseGestureFileContents} from '../utils/gesturefile-parsing.js';
@@ -108,6 +120,23 @@ export const TOGGLE_SHOW_ATTRIBUTES = 'TOGGLE_SHOW_ATTRIBUTES';
 export const SET_REFRESHING_STATE = 'SET_REFRESHING_STATE';
 
 export const SET_AUTO_SESSION_RESTART = 'SET_AUTO_SESSION_RESTART';
+
+export const ACTION_CHAIN_UPLOAD_REQUESTED = 'ACTION_CHAIN_UPLOAD_REQUESTED';
+export const ACTION_CHAIN_UPLOAD_DONE = 'ACTION_CHAIN_UPLOAD_DONE';
+export const SHOW_ACTION_CHAIN_EDITOR = 'SHOW_ACTION_CHAIN_EDITOR';
+export const HIDE_ACTION_CHAIN_EDITOR = 'HIDE_ACTION_CHAIN_EDITOR';
+export const GET_SAVED_ACTION_CHAINS_REQUESTED = 'GET_SAVED_ACTION_CHAINS_REQUESTED';
+export const GET_SAVED_ACTION_CHAINS_DONE = 'GET_SAVED_ACTION_CHAINS_DONE';
+export const DELETE_SAVED_ACTION_CHAINS_REQUESTED = 'DELETE_SAVED_ACTION_CHAINS_REQUESTED';
+export const DELETE_SAVED_ACTION_CHAINS_DONE = 'DELETE_SAVED_ACTION_CHAINS_DONE';
+export const SET_LOADED_ACTION_CHAIN = 'SET_LOADED_ACTION_CHAIN';
+export const REMOVE_LOADED_ACTION_CHAIN = 'REMOVE_LOADED_ACTION_CHAIN';
+export const RUN_ACTION_CHAIN_STARTED = 'RUN_ACTION_CHAIN_STARTED';
+export const RUN_ACTION_CHAIN_STEP_UPDATED = 'RUN_ACTION_CHAIN_STEP_UPDATED';
+export const RUN_ACTION_CHAIN_DONE = 'RUN_ACTION_CHAIN_DONE';
+export const CLEAR_ACTION_CHAIN_RUN_RESULT = 'CLEAR_ACTION_CHAIN_RUN_RESULT';
+
+let activeActionChainAbortController = null;
 
 const KEEP_ALIVE_PING_INTERVAL = 20 * 1000;
 const NO_NEW_COMMAND_LIMIT = 24 * 60 * 60 * 1000; // Set timeout to 24 hours
@@ -337,6 +366,10 @@ export function setExpandedPaths(paths) {
  */
 export function quitSession({reason, manualQuit = true, detachOnly = false} = {}) {
   return async (dispatch, getState) => {
+    if (activeActionChainAbortController) {
+      activeActionChainAbortController.abort();
+      activeActionChainAbortController = null;
+    }
     const killAction = killKeepAliveLoop();
     killAction(dispatch, getState);
     if (!detachOnly) {
@@ -1098,4 +1131,226 @@ function parseAndValidateGestureFileString(gestureFileString) {
     return null;
   }
   return omit(gestureJSON, ['id', 'date']);
+}
+
+export function importActionChainFiles(fileList) {
+  return async (dispatch) => {
+    dispatch({type: ACTION_CHAIN_UPLOAD_REQUESTED});
+    const uploadedFiles = await readTextFromUploadedFiles(fileList);
+    const invalidFiles = [];
+    const parsedChains = [];
+    for (const file of uploadedFiles) {
+      const {fileName, content, error} = file;
+      if (error) {
+        invalidFiles.push(fileName);
+        continue;
+      }
+      const chainJSON = parseActionChainFileContents(content);
+      if (!chainJSON) {
+        invalidFiles.push(fileName);
+        continue;
+      }
+      parsedChains.push(omit(normalizeActionChain(chainJSON), ['id', 'date']));
+    }
+
+    for (const parsedChain of parsedChains) {
+      await saveActionChain(parsedChain)(dispatch);
+    }
+    dispatch({type: ACTION_CHAIN_UPLOAD_DONE});
+
+    if (!isEmpty(invalidFiles)) {
+      notification.error({
+        title: i18n.t('unableToImportActionChainFiles', {fileNames: invalidFiles.join(', ')}),
+        duration: 0,
+      });
+    }
+  };
+}
+
+export function exportSavedActionChain(actionChain) {
+  return async () => {
+    const cleanedName = `action-chain-${actionChain.name}`;
+    const chainToExport = prepareActionChainForExport(actionChain);
+    const href = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(chainToExport, null, 2))}`;
+    const escapedName = sanitize(cleanedName, {replacement: '_'});
+    const fileName = `${escapedName}.json`;
+    downloadFile(href, fileName);
+  };
+}
+
+export function saveActionChain(actionChain) {
+  return async (dispatch) => {
+    const savedActionChains = (await getSetting(SAVED_ACTION_CHAINS)) || [];
+    const normalized = normalizeActionChain(actionChain);
+
+    if (normalized.id) {
+      let updated = false;
+      for (const savedChain of savedActionChains) {
+        if (savedChain.id === normalized.id) {
+          savedChain.name = normalized.name;
+          savedChain.description = normalized.description;
+          savedChain.steps = normalized.steps;
+          updated = true;
+          break;
+        }
+      }
+      if (!updated) {
+        normalized.date ??= Date.now();
+        savedActionChains.push(normalized);
+      }
+    } else {
+      normalized.id = getRandomId();
+      normalized.date = Date.now();
+      savedActionChains.push(normalized);
+    }
+
+    await setSetting(SAVED_ACTION_CHAINS, savedActionChains);
+    await getSavedActionChains()(dispatch);
+    return normalized;
+  };
+}
+
+export function getSavedActionChains() {
+  return async (dispatch) => {
+    dispatch({type: GET_SAVED_ACTION_CHAINS_REQUESTED});
+    const savedActionChains = await getSetting(SAVED_ACTION_CHAINS);
+    dispatch({type: GET_SAVED_ACTION_CHAINS_DONE, savedActionChains});
+  };
+}
+
+export function deleteSavedActionChain(id) {
+  return async (dispatch) => {
+    dispatch({type: DELETE_SAVED_ACTION_CHAINS_REQUESTED, deleteActionChain: id});
+    const chains = (await getSetting(SAVED_ACTION_CHAINS)) || [];
+    const newChains = chains.filter((chain) => chain.id !== id);
+    await setSetting(SAVED_ACTION_CHAINS, newChains);
+    dispatch({type: DELETE_SAVED_ACTION_CHAINS_DONE});
+    dispatch({type: GET_SAVED_ACTION_CHAINS_DONE, savedActionChains: newChains});
+  };
+}
+
+export function showActionChainEditor() {
+  return (dispatch) => {
+    dispatch({type: SHOW_ACTION_CHAIN_EDITOR});
+  };
+}
+
+export function hideActionChainEditor() {
+  return (dispatch) => {
+    dispatch({type: HIDE_ACTION_CHAIN_EDITOR});
+  };
+}
+
+export function setLoadedActionChain(loadedActionChain) {
+  return (dispatch) => {
+    dispatch({type: SET_LOADED_ACTION_CHAIN, loadedActionChain});
+  };
+}
+
+export function removeLoadedActionChain() {
+  return (dispatch) => {
+    dispatch({type: REMOVE_LOADED_ACTION_CHAIN});
+  };
+}
+
+export function clearActionChainRunResult() {
+  return (dispatch) => {
+    dispatch({type: CLEAR_ACTION_CHAIN_RUN_RESULT});
+  };
+}
+
+export function stopActionChain() {
+  return () => {
+    if (activeActionChainAbortController) {
+      activeActionChainAbortController.abort();
+    }
+  };
+}
+
+export function runActionChain(actionChain) {
+  return async (dispatch, getState) => {
+    if (getState().inspector.runningActionChain) {
+      return null;
+    }
+    const steps = actionChain?.steps || [];
+    if (isEmpty(steps)) {
+      notification.warning({
+        title: i18n.t('actionChainEmptyWarning'),
+        duration: 5,
+      });
+      return null;
+    }
+
+    const abortController = new AbortController();
+    activeActionChainAbortController = abortController;
+    const chainId = actionChain.id ?? null;
+    const chainName = actionChain.name || i18n.t('unnamed');
+
+    dispatch({
+      type: RUN_ACTION_CHAIN_STARTED,
+      chainId,
+      chainName,
+      totalSteps: steps.length,
+    });
+
+    let outcome;
+    try {
+      outcome = await executeActionChain(actionChain, {
+        signal: abortController.signal,
+        executeCommand: async ({methodName, args}) => {
+          keepSessionAlive()(dispatch, getState);
+          return await executeDriverCommand({methodName, args})(dispatch, getState);
+        },
+        getPageSource: async () => {
+          keepSessionAlive()(dispatch, getState);
+          const {driver} = getState().inspector;
+          return await driver.getPageSource();
+        },
+        onStepStart: (stepIndex, stepResult) => {
+          dispatch({type: RUN_ACTION_CHAIN_STEP_UPDATED, stepIndex, stepResult});
+        },
+        onStepComplete: (stepIndex, stepResult) => {
+          dispatch({type: RUN_ACTION_CHAIN_STEP_UPDATED, stepIndex, stepResult});
+        },
+      });
+    } finally {
+      if (activeActionChainAbortController === abortController) {
+        activeActionChainAbortController = null;
+      }
+    }
+
+    if (!abortController.signal.aborted && outcome.hasDriverCommands && getState().inspector.isSourceRefreshOn) {
+      await applyClientMethod({methodName: 'getPageSource'})(dispatch, getState);
+    }
+
+    const runResult = {
+      chainId,
+      chainName,
+      ...outcome,
+    };
+    dispatch({type: RUN_ACTION_CHAIN_DONE, runResult});
+
+    if (outcome.status === ACTION_CHAIN_RUN_STATUS.PASSED) {
+      notification.success({
+        title: i18n.t('actionChainCompleted', {chainName}),
+        duration: 5,
+      });
+    } else if (outcome.status === ACTION_CHAIN_RUN_STATUS.CANCELLED) {
+      notification.info({
+        title: i18n.t('actionChainStopped', {chainName}),
+        duration: 5,
+      });
+    } else {
+      notification.error({
+        title: i18n.t('actionChainFailed', {
+          chainName,
+          stepNumber: (outcome.failedStepIndex ?? 0) + 1,
+        }),
+        description: outcome.error,
+        duration: 8,
+      });
+    }
+
+    return runResult;
+  };
 }
